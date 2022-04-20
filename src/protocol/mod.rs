@@ -1,3 +1,4 @@
+use alloc::string::FromUtf8Error;
 use std::io::{Read, Write};
 use thiserror::Error;
 
@@ -16,7 +17,13 @@ pub enum SerdeError {
     Malformed(#[from] Box<dyn std::error::Error + Send + Sync>),
 }
 
-pub trait Serializer<R: Read, W: Write>: Sized {
-    fn decode(reader :&mut R) -> Result<Self, SerdeError>;
-    fn encode(&self, writer: &mut W) -> Result<(), SerdeError>;
+pub trait Serializer: Sized {
+    fn decode(reader: &mut impl Read) -> Result<Self, SerdeError>;
+    fn encode(&self, writer: &mut impl Write) -> Result<(), SerdeError>;
+}
+
+impl From<FromUtf8Error> for SerdeError {
+    fn from(err: FromUtf8Error) -> Self {
+        SerdeError::Malformed(Box::new(err))
+    }
 }

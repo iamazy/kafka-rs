@@ -1,4 +1,3 @@
-
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
 pub enum ApiKey {
     Produce,
