@@ -213,3 +213,160 @@ impl Serializer for String_ {
         Ok(())
     }
 }
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
+pub struct CompactString(pub String);
+
+impl Serializer for CompactString {
+    fn decode(reader: &mut impl Read) -> Result<Self, SerdeError> {
+        let len = UnsignedVarInt::decode(reader)?;
+        match len.0 {
+            0 => Err(SerdeError::Malformed(
+               "Compact string length is zero.".into(),
+            )),
+            len => {
+                let len = usize::try_from(len)?;
+                let len = len - 1;
+                let mut buf = vec![0u8; len];
+                reader.read_exact(&mut buf)?;
+                Ok(Self(String::from_utf8(buf)?))
+            }
+        }
+    }
+
+    fn encode(&self, writer: &mut impl Write) -> Result<(), SerdeError> {
+        let len = u64::try_from(self.0.len() + 1).map_err(SerdeError::Overflow)?;
+        UnsignedVarInt(len).encode(writer)?;
+        writer.write_all(self.0.as_bytes())?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
+pub struct CompactNullableString(pub Option<String>);
+
+impl Serializer for CompactNullableString {
+    fn decode(reader: &mut impl Read) -> Result<Self, SerdeError> {
+        let len = UnsignedVarInt::decode(reader)?;
+        match len.0 {
+            0 => Ok(Self(None)),
+            len => {
+                let len = usize::try_from(len)?;
+                let len = len - 1;
+                let mut buf = vec![0u8; len];
+                reader.read_exact(&mut buf)?;
+                Ok(Self(Some(String::from_utf8(buf)?)))
+            }
+        }
+    }
+
+    fn encode(&self, writer: &mut impl Write) -> Result<(), SerdeError> {
+        match self.0 {
+            Some(ref s) => {
+                let len = u64::try_from(s.len() + 1).map_err(SerdeError::Overflow)?;
+                UnsignedVarInt(len).encode(writer)?;
+                writer.write_all(s.as_bytes())?;
+                Ok(())
+            }
+            None => UnsignedVarInt(0).encode(writer),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct NullableBytes(pub Option<Vec<u8>>);
+
+impl Serializer for NullableBytes {
+    fn decode(reader: &mut impl Read) -> Result<Self, SerdeError> {
+        let len = Int32::decode(reader)?;
+        match len.0 {
+            l if l < -1 => Err(SerdeError::Malformed(
+                String::from("Nullable bytes length is negative.").into(),
+            )),
+            -1 => Ok(Self(None)),
+            l => {
+                let len = usize::try_from(l)?;
+                let mut buf = vec![0u8; len];
+                reader.read_exact(&mut buf)?;
+                Ok(Self(Some(buf)))
+            }
+        }
+    }
+
+    fn encode(&self, writer: &mut impl Write) -> Result<(), SerdeError> {
+        match self.0 {
+            Some(ref s) => {
+                let len = i32::try_from(s.len()).map_err(|e| SerdeError::Malformed(e.into()))?;
+                Int32(len).encode(writer)?;
+                writer.write_all(s)?;
+                Ok(())
+            }
+            None => Int32(-1).encode(writer),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct TaggedFields(pub Vec<(UnsignedVarInt, Vec<u8>)>);
+
+impl Serializer for TaggedFields {
+    fn decode(reader: &mut impl Read) -> Result<Self, SerdeError> {
+        let len = UnsignedVarInt::decode(reader)?;
+        let len = usize::try_from(len.0).map_err(SerdeError::Overflow)?;
+        let mut fields = Vec::with_capacity(len);
+        for _ in 0..len {
+            let tag = UnsignedVarInt::decode(reader)?;
+            let len = UnsignedVarInt::decode(reader)?;
+            let len = usize::try_from(len.0).map_err(SerdeError::Overflow)?;
+            let mut buf = vec![0u8; len];
+            reader.read_exact(&mut buf)?;
+            fields.push((tag, buf));
+        }
+        Ok(Self(fields))
+    }
+
+    fn encode(&self, writer: &mut impl Write) -> Result<(), SerdeError> {
+        let len = u64::try_from(self.0.len()).map_err(SerdeError::Overflow)?;
+        UnsignedVarInt(len).encode(writer)?;
+        for (tag, buf) in self.0.iter() {
+            tag.encode(writer)?;
+            let len = u64::try_from(buf.len()).map_err(SerdeError::Overflow)?;
+            UnsignedVarInt(len).encode(writer)?;
+            writer.write_all(buf)?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
+pub struct Array<T: Serializer>(pub Option<Vec<T>>);
+
+impl<T: Serializer> Serializer for Array<T> {
+    fn decode(reader: &mut impl Read) -> Result<Self, SerdeError> {
+        let len = Int32::decode(reader)?;
+        if len.0 == - 1 {
+            Ok(Self(None))
+        } else {
+            let len = usize::try_from(len.0).map_err(SerdeError::Overflow)?;
+            let mut array = Vec::with_capacity(len);
+            for _ in 0..len {
+                array.push(T::decode(reader)?);
+            }
+            Ok(Self(Some(array)))
+        }
+    }
+
+    fn encode(&self, writer: &mut impl Write) -> Result<(), SerdeError> {
+        match self.0 {
+            None => Int32(-1).encode(writer),
+            Some(ref array) => {
+                let len = i32::try_from(array.len()).map_err(|e| SerdeError::Malformed(e.into()))?;
+                Int32(len).encode(writer)?;
+                for item in array.iter() {
+                    item.encode(writer)?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
