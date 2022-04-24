@@ -7,6 +7,32 @@ edition = "2021"
 
 [dependencies]
 integer-encoding = "3"
-tokio = { version = "1", features = ["full"]}
-tokio-util = "0.7"
 thiserror = "1"
+rand = "0.8"
+chrono = "0.4"
+futures-timer = "3.0"
+futures = "0.3"
+log = "0.4.6"
+url = "2.1"
+regex = "1.1.7"
+bit-vec = "0.6"
+futures-io = "0.3"
+native-tls = "0.2"
+tokio = { version = "1", features = ["full"], optional = true }
+tokio-util = { version = "0.7", features = ["codec"], optional = true }
+tokio-native-tls = { version = "0.3", optional = true }
+async-std = {version = "1", features = [ "attributes", "unstable" ], optional = true }
+asynchronous-codec = { version = "0.6", optional = true }
+async-native-tls = { version = "0.3", optional = true }
+lz4 = { version = "1.23", optional = true }
+flate2 = { version = "1.0", optional = true }
+zstd = { version = "0.9", optional = true }
+snap = { version = "1.0", optional = true }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+[features]
+default = [ "compression", "tokio-runtime", "async-std-runtime" ]
+compression = [ "lz4", "flate2", "zstd", "snap" ]
+tokio-runtime = [ "tokio", "tokio-util", "tokio-native-tls" ]
+async-std-runtime = [ "async-std", "asynchronous-codec", "async-native-tls" ]

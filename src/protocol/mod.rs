@@ -1,9 +1,10 @@
-use alloc::string::FromUtf8Error;
 use std::io::{Read, Write};
+use std::string::FromUtf8Error;
 use thiserror::Error;
 
 pub mod api_key;
 pub mod primitive;
+pub mod record;
 
 #[derive(Error, Debug)]
 pub enum SerdeError {
@@ -27,3 +28,24 @@ impl From<FromUtf8Error> for SerdeError {
         SerdeError::Malformed(Box::new(err))
     }
 }
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum Command{
+    Request {
+        api_version: i16,
+        correlation_id: i32,
+        client_id: String,
+        body: Request,
+    },
+    Response {
+        correlation_id: i32,
+        throttle_time_ms: i32,
+        body: Response,
+    },
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum Request {}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum Response {}
