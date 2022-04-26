@@ -16,9 +16,9 @@ pub trait Executor: Clone + Send + Sync + 'static {
     fn spawn(&self, f: Pin<Box<dyn Future<Output = ()> + Send>>) -> Result<(), ()>;
     /// spawns a new blocking task
     fn spawn_blocking<F, Res>(&self, f: F) -> JoinHandle<Res>
-        where
-            F: FnOnce() -> Res + Send + 'static,
-            Res: Send + 'static;
+    where
+        F: FnOnce() -> Res + Send + 'static,
+        Res: Send + 'static;
 
     /// returns a Stream that will produce at regular intervals
     fn interval(&self, duration: std::time::Duration) -> Interval;
@@ -45,9 +45,9 @@ impl Executor for TokioExecutor {
     }
 
     fn spawn_blocking<F, Res>(&self, f: F) -> JoinHandle<Res>
-        where
-            F: FnOnce() -> Res + Send + 'static,
-            Res: Send + 'static,
+    where
+        F: FnOnce() -> Res + Send + 'static,
+        Res: Send + 'static,
     {
         JoinHandle::Tokio(tokio::task::spawn_blocking(f))
     }
@@ -78,9 +78,9 @@ impl Executor for AsyncStdExecutor {
     }
 
     fn spawn_blocking<F, Res>(&self, f: F) -> JoinHandle<Res>
-        where
-            F: FnOnce() -> Res + Send + 'static,
-            Res: Send + 'static,
+    where
+        F: FnOnce() -> Res + Send + 'static,
+        Res: Send + 'static,
     {
         JoinHandle::AsyncStd(async_std::task::spawn_blocking(f))
     }
@@ -105,9 +105,9 @@ impl<Exe: Executor> Executor for Arc<Exe> {
     }
 
     fn spawn_blocking<F, Res>(&self, f: F) -> JoinHandle<Res>
-        where
-            F: FnOnce() -> Res + Send + 'static,
-            Res: Send + 'static,
+    where
+        F: FnOnce() -> Res + Send + 'static,
+        Res: Send + 'static,
     {
         self.deref().spawn_blocking(f)
     }

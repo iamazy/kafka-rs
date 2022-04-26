@@ -1,6 +1,7 @@
 use std::io;
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use kafka_protocol::protocol::{DecodeError, EncodeError};
 
 #[derive(Debug)]
 pub enum Error {
@@ -22,8 +23,26 @@ pub enum ConnectionError {
     Shutdown,
 }
 
+impl From<EncodeError> for ConnectionError {
+    fn from(_: EncodeError) -> Self {
+        ConnectionError::Encoding("encode error".into())
+    }
+}
+
+impl From<DecodeError> for ConnectionError {
+    fn from(_: DecodeError) -> Self {
+        ConnectionError::Decoding("decode error".into())
+    }
+}
+
+impl From<std::io::Error> for ConnectionError {
+    fn from(e: std::io::Error) -> Self {
+        ConnectionError::Io(e)
+    }
+}
+
 #[derive(Clone)]
-pub(crate) struct SharedError {
+pub struct SharedError {
     error_set: Arc<AtomicBool>,
     error: Arc<Mutex<Option<ConnectionError>>>,
 }
