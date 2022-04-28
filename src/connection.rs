@@ -1,22 +1,43 @@
-use crate::error::{ConnectionError, Error, SharedError};
-use crate::executor::Executor;
-use crate::message::Command;
+use crate::error::{ConnectionError, SharedError};
+use crate::executor::{Executor, ExecutorKind};
+use crate::message::{Command, KafkaCodec};
 use futures::channel::{mpsc, oneshot};
-use futures::{Future, FutureExt, Stream};
-use std::collections::{BTreeMap, HashMap};
+use futures::future::{select, Either};
+use futures::{pin_mut, Future, FutureExt, Sink, SinkExt, Stream, StreamExt};
+use rand::{thread_rng, Rng};
+use std::collections::BTreeMap;
+use std::net::SocketAddr;
 use std::pin::Pin;
-use std::sync::atomic::AtomicI32;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
-use tracing::trace;
+use tracing::{debug, error, trace};
 use url::Url;
+
+#[derive(Clone)]
+pub struct SerialId(Arc<AtomicUsize>);
+
+impl Default for SerialId {
+    fn default() -> Self {
+        SerialId(Arc::new(AtomicUsize::new(0)))
+    }
+}
+
+impl SerialId {
+    pub fn new() -> Self {
+        Self::default()
+    }
+    pub fn get(&self) -> u64 {
+        self.0.fetch_add(1, Ordering::Relaxed) as u64
+    }
+}
 
 pub struct ConnectionSender<Exe: Executor> {
     tx: mpsc::UnboundedSender<Command>,
     registrations: mpsc::UnboundedSender<(i32, oneshot::Sender<Command>)>,
     receiver_shutdown: Option<oneshot::Sender<()>>,
-    correlation_id: AtomicI32,
+    correlation_id: SerialId,
     error: SharedError,
     executor: Arc<Exe>,
     operation_timeout: Duration,
@@ -26,7 +47,7 @@ impl<Exe: Executor> ConnectionSender<Exe> {
     pub fn new(
         tx: mpsc::UnboundedSender<Command>,
         registrations: mpsc::UnboundedSender<(i32, oneshot::Sender<Command>)>,
-        receiver_shutdown: Option<oneshot::Sender<()>>,
+        receiver_shutdown: oneshot::Sender<()>,
         error: SharedError,
         executor: Arc<Exe>,
         operation_timeout: Duration,
@@ -34,8 +55,8 @@ impl<Exe: Executor> ConnectionSender<Exe> {
         Self {
             tx,
             registrations,
-            receiver_shutdown,
-            correlation_id: AtomicI32::new(1),
+            receiver_shutdown: Some(receiver_shutdown),
+            correlation_id: SerialId::new(),
             error,
             executor,
             operation_timeout,
@@ -43,11 +64,42 @@ impl<Exe: Executor> ConnectionSender<Exe> {
     }
 
     #[tracing::instrument(skip(self, cmd))]
-    pub async fn send(&self, cmd: Command) -> Result<Command, Error> {
-        // let (sender, receiver) = oneshot::channel();
-        // trace!("sending command: {:?}", cmd);
-        let mut cmd = cmd;
-        todo!()
+    pub async fn send(&self, cmd: Command) -> Result<Command, ConnectionError> {
+        let (resolver, response) = oneshot::channel();
+        let response = async {
+            response.await.map_err(|oneshot::Canceled| {
+                self.error.set(ConnectionError::Disconnected);
+                ConnectionError::Disconnected
+            })
+        };
+        match (
+            self.registrations
+                .unbounded_send((cmd.correlation_id(), resolver)),
+            self.tx.unbounded_send(cmd),
+        ) {
+            (Ok(_), Ok(_)) => {
+                let delay_f = self.executor.delay(self.operation_timeout);
+                pin_mut!(response);
+                pin_mut!(delay_f);
+
+                match select(response, delay_f).await {
+                    Either::Left((res, _)) => res,
+                    Either::Right(_) => Err(ConnectionError::Io(std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "timeout sending message to the kafka server",
+                    ))),
+                }
+            }
+            _ => Err(ConnectionError::Disconnected),
+        }
+    }
+
+    #[tracing::instrument(skip(self, cmd))]
+    pub async fn send_oneway(&self, cmd: Command) -> Result<(), ConnectionError> {
+        self.tx
+            .unbounded_send(cmd)
+            .map_err(|_| ConnectionError::Disconnected)?;
+        Ok(())
     }
 }
 
@@ -116,7 +168,8 @@ impl<S: Stream<Item = Result<Command, ConnectionError>>> Future for Receiver<S> 
             match self.inbound.as_mut().poll_next(cx) {
                 Poll::Ready(Some(Ok(cmd))) => {
                     if let Command::Response(ref res) = cmd {
-                        if let Some(resolver) = self.pending_requests.remove(&res.header.correlation_id)
+                        if let Some(resolver) =
+                            self.pending_requests.remove(&res.header.correlation_id)
                         {
                             let _ = resolver.send(cmd);
                         }
@@ -125,7 +178,7 @@ impl<S: Stream<Item = Result<Command, ConnectionError>>> Future for Receiver<S> 
                 Poll::Ready(None) => {
                     self.error.set(ConnectionError::Disconnected);
                     return Poll::Ready(Err(()));
-                },
+                }
                 Poll::Pending => return Poll::Pending,
                 Poll::Ready(Some(Err(e))) => {
                     self.error.set(e);
@@ -140,4 +193,172 @@ pub struct Connection<Exe: Executor> {
     id: i64,
     url: Url,
     sender: ConnectionSender<Exe>,
+}
+
+impl<Exe: Executor> Connection<Exe> {
+    pub async fn new(
+        url: Url,
+        connection_timeout: Duration,
+        operation_timeout: Duration,
+        executor: Arc<Exe>,
+    ) -> Result<Connection<Exe>, ConnectionError> {
+        if url.scheme() != "kafka" {
+            return Err(ConnectionError::NotFound);
+        }
+
+        let u = url.clone();
+        let address: SocketAddr = match executor
+            .spawn_blocking(move || {
+                u.socket_addrs(|| match u.scheme() {
+                    "kafka" => Some(6650),
+                    _ => None,
+                })
+                .map_err(|e| {
+                    error!("could not look up address: {:?}", e);
+                    e
+                })
+                .ok()
+                .and_then(|v| {
+                    let mut rng = thread_rng();
+                    let index: usize = rng.gen_range(0..v.len());
+                    v.get(index).copied()
+                })
+            })
+            .await
+        {
+            Some(Some(addr)) => addr,
+            _ => return Err(ConnectionError::NotFound),
+        };
+        debug!("connecting to {}:{}", url, address);
+        let sender_prepare =
+            Connection::prepare_stream(address, executor.clone(), operation_timeout);
+        let delay_f = executor.delay(connection_timeout);
+
+        pin_mut!(sender_prepare);
+        pin_mut!(delay_f);
+
+        let sender = match select(sender_prepare, delay_f).await {
+            Either::Left((s, _)) => s?,
+            Either::Right(_) => {
+                return Err(ConnectionError::Io(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "timeout connecting to the kafka server.",
+                )))
+            }
+        };
+
+        let id = rand::random();
+        Ok(Connection { id, url, sender })
+    }
+
+    async fn prepare_stream(
+        address: SocketAddr,
+        executor: Arc<Exe>,
+        operation_timeout: Duration,
+    ) -> Result<ConnectionSender<Exe>, ConnectionError> {
+        match executor.kind() {
+            #[cfg(feature = "tokio-runtime")]
+            ExecutorKind::Tokio => {
+                let stream = tokio::net::TcpStream::connect(&address)
+                    .await
+                    .map(|stream| tokio_util::codec::Framed::new(stream, KafkaCodec))?;
+                Connection::connect(stream, executor, operation_timeout).await
+            }
+            #[cfg(feature = "async-std-runtime")]
+            ExecutorKind::AsyncStd => {
+                unimplemented!("not yet implemented");
+                // let stream = async_std::net::TcpStream::connect(&address)
+                //     .await
+                //     .map(|stream| asynchronous_codec::Framed::new(stream, KafkaCodec))?;
+                // Connection::connect(stream, executor, operation_timeout).await
+            }
+            #[cfg(not(feature = "tokio-runtime"))]
+            ExecutorKind::Tokio => {
+                unimplemented!("the tokio-runtime cargo feature is not active.");
+            }
+            #[cfg(not(feature = "async-std-runtime"))]
+            ExecutorKind::AsyncStd => {
+                unimplemented!("the async-std-runtime cargo feature is not active.");
+            }
+        }
+    }
+
+    pub async fn connect<S>(
+        stream: S,
+        executor: Arc<Exe>,
+        operation_timeout: Duration,
+    ) -> Result<ConnectionSender<Exe>, ConnectionError>
+    where
+        S: Stream<Item = Result<Command, ConnectionError>>,
+        S: Sink<Command, Error = ConnectionError>,
+        S: Send + std::marker::Unpin + 'static,
+    {
+        let (mut sink, stream) = stream.split();
+        let (tx, mut rx) = mpsc::unbounded();
+        let (registrations_tx, registrations_rx) = mpsc::unbounded();
+        let error = SharedError::new();
+        let (receiver_shutdown_tx, receiver_shutdown_rx) = oneshot::channel();
+
+        if executor
+            .spawn(Box::pin(
+                Receiver::new(
+                    stream,
+                    tx.clone(),
+                    error.clone(),
+                    registrations_rx,
+                    receiver_shutdown_rx,
+                )
+                .map(|_| ()),
+            ))
+            .is_err()
+        {
+            error!("the executor could not spawn the receiver future");
+            return Err(ConnectionError::Shutdown);
+        }
+
+        let err = error.clone();
+        let res = executor.spawn(Box::pin(async move {
+            while let Some(cmd) = rx.next().await {
+                if let Err(e) = sink.send(cmd).await {
+                    err.set(e);
+                    break;
+                }
+            }
+        }));
+        if res.is_err() {
+            error!("the executor could not spawn the receiver future");
+            return Err(ConnectionError::Shutdown);
+        }
+
+        let sender = ConnectionSender::new(
+            tx,
+            registrations_tx,
+            receiver_shutdown_tx,
+            error,
+            executor,
+            operation_timeout,
+        );
+        Ok(sender)
+    }
+
+    pub fn sender(&self) -> &ConnectionSender<Exe> {
+        &self.sender
+    }
+
+    pub fn id(&self) -> i64 {
+        self.id
+    }
+
+    pub fn is_valid(&self) -> bool {
+        !self.sender.error.is_set()
+    }
+}
+
+impl<Exe: Executor> Drop for Connection<Exe> {
+    fn drop(&mut self) {
+        trace!("dropping connection {} for {}", self.id, self.url);
+        if let Some(shutdown) = self.sender.receiver_shutdown.take() {
+            let _ = shutdown.send(());
+        }
+    }
 }

@@ -1,7 +1,7 @@
+use kafka_protocol::protocol::{DecodeError, EncodeError};
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use kafka_protocol::protocol::{DecodeError, EncodeError};
 
 #[derive(Debug)]
 pub enum Error {

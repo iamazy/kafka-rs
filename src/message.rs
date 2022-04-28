@@ -1,12 +1,7 @@
 use crate::error::ConnectionError;
-use kafka_protocol::messages::*;
-use kafka_protocol::protocol::buf::ByteBuf;
-use kafka_protocol::protocol::{Decodable, DecodeError, Encodable, EncodeError, HeaderVersion};
-use std::collections::HashMap;
-use std::io::Cursor;
-use std::sync::atomic::AtomicI32;
-use std::sync::{Arc, Mutex};
 use bytes::{Buf, BufMut, BytesMut};
+use kafka_protocol::messages::*;
+use kafka_protocol::protocol::{Decodable, Encodable, HeaderVersion};
 
 pub struct KafkaCodec;
 
@@ -20,27 +15,39 @@ impl tokio_util::codec::Encoder<Command> for KafkaCodec {
             let mut bytes = BytesMut::new();
             match request.body {
                 RequestKind::ProduceRequest(req) => {
-                    request.header.encode(&mut bytes, ProduceRequest::header_version(api_version))?;
+                    request
+                        .header
+                        .encode(&mut bytes, ProduceRequest::header_version(api_version))?;
                     req.encode(&mut bytes, api_version)?;
                 }
                 RequestKind::FetchRequest(req) => {
-                    request.header.encode(&mut bytes, FetchRequest::header_version(api_version))?;
+                    request
+                        .header
+                        .encode(&mut bytes, FetchRequest::header_version(api_version))?;
                     req.encode(&mut bytes, api_version)?;
                 }
                 RequestKind::ListOffsetsRequest(req) => {
-                    request.header.encode(&mut bytes, ListOffsetsRequest::header_version(api_version))?;
+                    request
+                        .header
+                        .encode(&mut bytes, ListOffsetsRequest::header_version(api_version))?;
                     req.encode(&mut bytes, api_version)?;
                 }
                 RequestKind::MetadataRequest(req) => {
-                    request.header.encode(&mut bytes, MetadataRequest::header_version(api_version))?;
+                    request
+                        .header
+                        .encode(&mut bytes, MetadataRequest::header_version(api_version))?;
                     req.encode(&mut bytes, api_version)?;
                 }
                 RequestKind::LeaderAndIsrRequest(req) => {
-                    request.header.encode(&mut bytes, LeaderAndIsrRequest::header_version(api_version))?;
+                    request
+                        .header
+                        .encode(&mut bytes, LeaderAndIsrRequest::header_version(api_version))?;
                     req.encode(&mut bytes, api_version)?;
                 }
                 RequestKind::StopReplicaRequest(req) => {
-                    request.header.encode(&mut bytes, StopReplicaRequest::header_version(api_version))?;
+                    request
+                        .header
+                        .encode(&mut bytes, StopReplicaRequest::header_version(api_version))?;
                     req.encode(&mut bytes, api_version)?;
                 }
                 RequestKind::UpdateMetadataRequest(req) => {
@@ -58,11 +65,15 @@ impl tokio_util::codec::Encoder<Command> for KafkaCodec {
                     req.encode(&mut bytes, api_version)?;
                 }
                 RequestKind::OffsetCommitRequest(req) => {
-                    request.header.encode(&mut bytes, OffsetCommitRequest::header_version(api_version))?;
+                    request
+                        .header
+                        .encode(&mut bytes, OffsetCommitRequest::header_version(api_version))?;
                     req.encode(&mut bytes, api_version)?;
                 }
                 RequestKind::OffsetFetchRequest(req) => {
-                    request.header.encode(&mut bytes, OffsetFetchRequest::header_version(api_version))?;
+                    request
+                        .header
+                        .encode(&mut bytes, OffsetFetchRequest::header_version(api_version))?;
                     req.encode(&mut bytes, api_version)?;
                 }
                 RequestKind::FindCoordinatorRequest(req) => {
@@ -73,19 +84,27 @@ impl tokio_util::codec::Encoder<Command> for KafkaCodec {
                     req.encode(&mut bytes, api_version)?;
                 }
                 RequestKind::JoinGroupRequest(req) => {
-                    request.header.encode(&mut bytes, JoinGroupRequest::header_version(api_version))?;
+                    request
+                        .header
+                        .encode(&mut bytes, JoinGroupRequest::header_version(api_version))?;
                     req.encode(&mut bytes, api_version)?;
                 }
                 RequestKind::HeartbeatRequest(req) => {
-                    request.header.encode(&mut bytes, HeartbeatRequest::header_version(api_version))?;
+                    request
+                        .header
+                        .encode(&mut bytes, HeartbeatRequest::header_version(api_version))?;
                     req.encode(&mut bytes, api_version)?;
                 }
                 RequestKind::LeaveGroupRequest(req) => {
-                    request.header.encode(&mut bytes, LeaveGroupRequest::header_version(api_version))?;
+                    request
+                        .header
+                        .encode(&mut bytes, LeaveGroupRequest::header_version(api_version))?;
                     req.encode(&mut bytes, api_version)?;
                 }
                 RequestKind::SyncGroupRequest(req) => {
-                    request.header.encode(&mut bytes, SyncGroupRequest::header_version(api_version))?;
+                    request
+                        .header
+                        .encode(&mut bytes, SyncGroupRequest::header_version(api_version))?;
                     req.encode(&mut bytes, api_version)?;
                 }
                 RequestKind::DescribeGroupsRequest(req) => {
@@ -96,7 +115,9 @@ impl tokio_util::codec::Encoder<Command> for KafkaCodec {
                     req.encode(&mut bytes, api_version)?;
                 }
                 RequestKind::ListGroupsRequest(req) => {
-                    request.header.encode(&mut bytes, ListGroupsRequest::header_version(api_version))?;
+                    request
+                        .header
+                        .encode(&mut bytes, ListGroupsRequest::header_version(api_version))?;
                     req.encode(&mut bytes, api_version)?;
                 }
                 RequestKind::SaslHandshakeRequest(req) => {
@@ -107,15 +128,21 @@ impl tokio_util::codec::Encoder<Command> for KafkaCodec {
                     req.encode(&mut bytes, api_version)?;
                 }
                 RequestKind::ApiVersionsRequest(req) => {
-                    request.header.encode(&mut bytes, ApiVersionsRequest::header_version(api_version))?;
+                    request
+                        .header
+                        .encode(&mut bytes, ApiVersionsRequest::header_version(api_version))?;
                     req.encode(&mut bytes, api_version)?;
                 }
                 RequestKind::CreateTopicsRequest(req) => {
-                    request.header.encode(&mut bytes, CreateTopicsRequest::header_version(api_version))?;
+                    request
+                        .header
+                        .encode(&mut bytes, CreateTopicsRequest::header_version(api_version))?;
                     req.encode(&mut bytes, api_version)?;
                 }
                 RequestKind::DeleteTopicsRequest(req) => {
-                    request.header.encode(&mut bytes, DeleteTopicsRequest::header_version(api_version))?;
+                    request
+                        .header
+                        .encode(&mut bytes, DeleteTopicsRequest::header_version(api_version))?;
                     req.encode(&mut bytes, api_version)?;
                 }
                 RequestKind::DeleteRecordsRequest(req) => {
@@ -154,7 +181,9 @@ impl tokio_util::codec::Encoder<Command> for KafkaCodec {
                     req.encode(&mut bytes, api_version)?;
                 }
                 RequestKind::EndTxnRequest(req) => {
-                    request.header.encode(&mut bytes, EndTxnRequest::header_version(api_version))?;
+                    request
+                        .header
+                        .encode(&mut bytes, EndTxnRequest::header_version(api_version))?;
                     req.encode(&mut bytes, api_version)?;
                 }
                 RequestKind::WriteTxnMarkersRequest(req) => {
@@ -172,15 +201,21 @@ impl tokio_util::codec::Encoder<Command> for KafkaCodec {
                     req.encode(&mut bytes, api_version)?;
                 }
                 RequestKind::DescribeAclsRequest(req) => {
-                    request.header.encode(&mut bytes, DescribeAclsRequest::header_version(api_version))?;
+                    request
+                        .header
+                        .encode(&mut bytes, DescribeAclsRequest::header_version(api_version))?;
                     req.encode(&mut bytes, api_version)?;
                 }
                 RequestKind::CreateAclsRequest(req) => {
-                    request.header.encode(&mut bytes, CreateAclsRequest::header_version(api_version))?;
+                    request
+                        .header
+                        .encode(&mut bytes, CreateAclsRequest::header_version(api_version))?;
                     req.encode(&mut bytes, api_version)?;
                 }
                 RequestKind::DeleteAclsRequest(req) => {
-                    request.header.encode(&mut bytes, DeleteAclsRequest::header_version(api_version))?;
+                    request
+                        .header
+                        .encode(&mut bytes, DeleteAclsRequest::header_version(api_version))?;
                     req.encode(&mut bytes, api_version)?;
                 }
                 RequestKind::DescribeConfigsRequest(req) => {
@@ -191,7 +226,9 @@ impl tokio_util::codec::Encoder<Command> for KafkaCodec {
                     req.encode(&mut bytes, api_version)?;
                 }
                 RequestKind::AlterConfigsRequest(req) => {
-                    request.header.encode(&mut bytes, AlterConfigsRequest::header_version(api_version))?;
+                    request
+                        .header
+                        .encode(&mut bytes, AlterConfigsRequest::header_version(api_version))?;
                     req.encode(&mut bytes, api_version)?;
                 }
                 RequestKind::AlterReplicaLogDirsRequest(req) => {
@@ -251,11 +288,15 @@ impl tokio_util::codec::Encoder<Command> for KafkaCodec {
                     req.encode(&mut bytes, api_version)?;
                 }
                 RequestKind::DeleteGroupsRequest(req) => {
-                    request.header.encode(&mut bytes, DeleteGroupsRequest::header_version(api_version))?;
+                    request
+                        .header
+                        .encode(&mut bytes, DeleteGroupsRequest::header_version(api_version))?;
                     req.encode(&mut bytes, api_version)?;
                 }
                 RequestKind::ElectLeadersRequest(req) => {
-                    request.header.encode(&mut bytes, ElectLeadersRequest::header_version(api_version))?;
+                    request
+                        .header
+                        .encode(&mut bytes, ElectLeadersRequest::header_version(api_version))?;
                     req.encode(&mut bytes, api_version)?;
                 }
                 RequestKind::IncrementalAlterConfigsRequest(req) => {
@@ -280,7 +321,9 @@ impl tokio_util::codec::Encoder<Command> for KafkaCodec {
                     req.encode(&mut bytes, api_version)?;
                 }
                 RequestKind::OffsetDeleteRequest(req) => {
-                    request.header.encode(&mut bytes, OffsetDeleteRequest::header_version(api_version))?;
+                    request
+                        .header
+                        .encode(&mut bytes, OffsetDeleteRequest::header_version(api_version))?;
                     req.encode(&mut bytes, api_version)?;
                 }
                 RequestKind::DescribeClientQuotasRequest(req) => {
@@ -354,10 +397,9 @@ impl tokio_util::codec::Encoder<Command> for KafkaCodec {
                     req.encode(&mut bytes, api_version)?;
                 }
                 RequestKind::VoteRequest(req) => {
-                    request.header.encode(
-                        &mut bytes,
-                        VoteRequest::header_version(api_version),
-                    )?;
+                    request
+                        .header
+                        .encode(&mut bytes, VoteRequest::header_version(api_version))?;
                     req.encode(&mut bytes, api_version)?;
                 }
                 RequestKind::BeginQuorumEpochRequest(req) => {
@@ -389,10 +431,9 @@ impl tokio_util::codec::Encoder<Command> for KafkaCodec {
                     req.encode(&mut bytes, api_version)?;
                 }
                 RequestKind::EnvelopeRequest(req) => {
-                    request.header.encode(
-                        &mut bytes,
-                        EnvelopeRequest::header_version(api_version),
-                    )?;
+                    request
+                        .header
+                        .encode(&mut bytes, EnvelopeRequest::header_version(api_version))?;
                     req.encode(&mut bytes, api_version)?;
                 }
                 RequestKind::FetchSnapshotRequest(req) => {
@@ -465,4 +506,20 @@ pub struct Response {
 pub enum Command {
     Request(Request),
     Response(Response),
+}
+
+impl Command {
+    pub fn is_request(&self) -> bool {
+        match self {
+            Command::Request(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn correlation_id(&self) -> i32 {
+        match self {
+            Command::Request(req) => req.header.correlation_id,
+            Command::Response(res) => res.header.correlation_id,
+        }
+    }
 }
