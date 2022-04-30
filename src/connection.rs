@@ -287,11 +287,10 @@ impl<Exe: Executor> Connection<Exe> {
             }
             #[cfg(feature = "async-std-runtime")]
             ExecutorKind::AsyncStd => {
-                unimplemented!("not yet implemented");
-                // let stream = async_std::net::TcpStream::connect(&address)
-                //     .await
-                //     .map(|stream| asynchronous_codec::Framed::new(stream, KafkaCodec))?;
-                // Connection::connect(stream, executor, operation_timeout).await
+                let stream = async_std::net::TcpStream::connect(&address)
+                    .await
+                    .map(|stream| asynchronous_codec::Framed::new(stream, KafkaCodec))?;
+                Connection::connect(stream, executor, operation_timeout).await
             }
             #[cfg(not(feature = "tokio-runtime"))]
             ExecutorKind::Tokio => {

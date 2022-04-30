@@ -5,12 +5,12 @@ use kafka_protocol::protocol::Request;
 
 use kafka_rs::connection_manager::{BrokerAddress, ConnectionManager, OperationRetryOptions};
 use kafka_rs::error::ConnectionError;
-use kafka_rs::executor::TokioExecutor;
+use kafka_rs::executor::{AsyncStdExecutor, TokioExecutor};
 use kafka_rs::protocol::KafkaRequest;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<ConnectionError>> {
-    let executor = Arc::new(TokioExecutor);
+    let executor = Arc::new(AsyncStdExecutor);
     let manager = ConnectionManager::new(
         "kafka://192.168.1.5:9092".into(),
         None,
