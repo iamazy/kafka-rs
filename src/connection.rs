@@ -114,10 +114,10 @@ impl<Exe: Executor> ConnectionSender<Exe> {
         }
     }
 
-    #[tracing::instrument(skip(self, cmd))]
-    pub async fn send_oneway(&self, cmd: Command) -> Result<(), ConnectionError> {
+    #[tracing::instrument(skip(self, request))]
+    pub async fn send_oneway(&self, request: KafkaRequest) -> Result<(), ConnectionError> {
         self.tx
-            .unbounded_send(cmd)
+            .unbounded_send(Command::Request(request))
             .map_err(|_| ConnectionError::Disconnected)?;
         Ok(())
     }

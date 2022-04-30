@@ -1,7 +1,7 @@
 use crate::connection::Connection;
 use crate::error::ConnectionError;
 use crate::executor::Executor;
-use crate::protocol::{Command, KafkaRequest, KafkaResponse};
+use crate::protocol::{KafkaRequest, KafkaResponse};
 use futures::channel::oneshot;
 use futures::lock::Mutex;
 use futures::StreamExt;
@@ -137,11 +137,11 @@ impl<Exe: Executor> ConnectionManager<Exe> {
     pub async fn invoke_oneway(
         &self,
         addr: &BrokerAddress,
-        cmd: Command,
+        request: KafkaRequest,
     ) -> Result<(), ConnectionError> {
         let conn = self.get_connection(addr).await?;
         let sender = conn.sender();
-        sender.send_oneway(cmd).await
+        sender.send_oneway(request).await
     }
 
     pub fn get_base_address(&self) -> BrokerAddress {
