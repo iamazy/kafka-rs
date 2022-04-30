@@ -1,0 +1,17 @@
+name: build kafka-rs
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Cargo build and test
+        run: |
+          cargo build
+          cargo test
