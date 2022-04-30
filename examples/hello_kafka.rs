@@ -29,8 +29,7 @@ async fn main() -> Result<(), Box<ConnectionError>> {
         broker_url: "localhost:9092".into(),
     };
     let response = manager.invoke(&addr, request).await?;
-    println!("{}", response.header.correlation_id);
-    if let ResponseKind::DescribeClusterResponse(res) = response.body.unwrap() {
+    if let Some(ResponseKind::DescribeClusterResponse(res)) = response.body {
         for (k, v) in res.brokers.iter() {
             println!("key: {:?}, value: {:?}", k, v.host);
         }

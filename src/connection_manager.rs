@@ -150,7 +150,7 @@ impl<Exe: Executor> ConnectionManager<Exe> {
             broker_url: format!(
                 "{}:{}",
                 self.url.host_str().unwrap(),
-                self.url.port().unwrap_or(6650)
+                self.url.port().unwrap_or(9092)
             ),
         }
     }
@@ -164,7 +164,7 @@ impl<Exe: Executor> ConnectionManager<Exe> {
             broker_url: format!(
                 "{}:{}",
                 broker.url.host_str().unwrap(),
-                broker.url.port().unwrap_or(6650)
+                broker.url.port().unwrap_or(9092)
             ),
         };
         self.get_connection(&broker_address).await

@@ -932,6 +932,7 @@ impl KafkaResponse {
                 }
             }
         }
+        self.raw_body.clear();
         Ok(())
     }
 }
