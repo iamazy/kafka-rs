@@ -12,7 +12,7 @@ pub enum ExecutorKind {
 /// Wrapper trait abstracting the Tokio and async-std executors
 pub trait Executor: Clone + Send + Sync + 'static {
     /// spawns a new task
-    #[allow(clippy::clippy::result_unit_err)]
+    #[allow(clippy::result_unit_err)]
     fn spawn(&self, f: Pin<Box<dyn Future<Output = ()> + Send>>) -> Result<(), ()>;
     /// spawns a new blocking task
     fn spawn_blocking<F, Res>(&self, f: F) -> JoinHandle<Res>
@@ -203,6 +203,7 @@ impl Stream for Interval {
 }
 
 /// a future producing a `()` after some time
+#[allow(clippy::large_enum_variant)]
 pub enum Delay {
     /// wrapper around tokio's `Sleep`
     #[cfg(feature = "tokio-runtime")]

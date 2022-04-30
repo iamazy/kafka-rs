@@ -1,23 +1,25 @@
 use crate::error::{ConnectionError, SharedError};
 use crate::executor::{Executor, ExecutorKind};
-use crate::protocol::{Command, KafkaCodec, KafkaRequest, KafkaResponse};
+use crate::protocol::{Command, KafkaCodec, KafkaResponse};
 use futures::channel::{mpsc, oneshot};
 use futures::future::{select, Either};
 use futures::{pin_mut, Future, FutureExt, Sink, SinkExt, Stream, StreamExt};
 use rand::{thread_rng, Rng};
-use std::collections::{BTreeMap, HashMap};
-use std::fmt::Debug;
+use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
-use dashmap::DashMap;
-use kafka_protocol::messages::{ApiKey, FetchResponse, ProduceResponse, RequestHeader};
-use kafka_protocol::protocol::{Decodable, Request};
+
 use tracing::{debug, error, trace};
 use url::Url;
+
+pub(crate) struct RegisterPair {
+    correlation_id: i32,
+    resolver: oneshot::Sender<Command>,
+}
 
 #[derive(Clone)]
 pub struct SerialId(Arc<AtomicUsize>);
@@ -39,7 +41,7 @@ impl SerialId {
 
 pub struct ConnectionSender<Exe: Executor> {
     tx: mpsc::UnboundedSender<Command>,
-    registrations: mpsc::UnboundedSender<(i32, oneshot::Sender<Command>)>,
+    registrations: mpsc::UnboundedSender<RegisterPair>,
     receiver_shutdown: Option<oneshot::Sender<()>>,
     correlation_id: SerialId,
     error: SharedError,
@@ -48,9 +50,9 @@ pub struct ConnectionSender<Exe: Executor> {
 }
 
 impl<Exe: Executor> ConnectionSender<Exe> {
-    pub fn new(
+    pub(crate) fn new(
         tx: mpsc::UnboundedSender<Command>,
-        registrations: mpsc::UnboundedSender<(i32, oneshot::Sender<Command>)>,
+        registrations: mpsc::UnboundedSender<RegisterPair>,
         receiver_shutdown: oneshot::Sender<()>,
         error: SharedError,
         executor: Arc<Exe>,
@@ -78,8 +80,10 @@ impl<Exe: Executor> ConnectionSender<Exe> {
         };
         let api_key = cmd.api_key();
         match (
-            self.registrations
-                .unbounded_send((cmd.correlation_id(), resolver)),
+            self.registrations.unbounded_send(RegisterPair {
+                correlation_id: cmd.correlation_id(),
+                resolver,
+            }),
             self.tx.unbounded_send(cmd),
         ) {
             (Ok(_), Ok(_)) => {
@@ -88,16 +92,14 @@ impl<Exe: Executor> ConnectionSender<Exe> {
                 pin_mut!(delay_f);
 
                 match select(response, delay_f).await {
-                    Either::Left((res, _)) => {
-                        res.map(|res_cmd| {
-                            if let Command::Response(mut res) = res_cmd {
-                                let _ = res.fill_body(api_key.unwrap(), version);
-                                res
-                            } else {
-                                panic!("Expected response command");
-                            }
-                        })
-                    },
+                    Either::Left((res, _)) => res.map(|res_cmd| {
+                        if let Command::Response(mut res) = res_cmd {
+                            let _ = res.fill_body(api_key.unwrap(), version);
+                            res
+                        } else {
+                            panic!("Expected response command");
+                        }
+                    }),
                     Either::Right(_) => Err(ConnectionError::Io(std::io::Error::new(
                         std::io::ErrorKind::TimedOut,
                         "timeout sending message to the kafka server",
@@ -123,7 +125,7 @@ struct Receiver<S: Stream<Item = Result<Command, ConnectionError>>> {
     error: SharedError,
     pending_requests: BTreeMap<i32, oneshot::Sender<Command>>,
     received_commands: BTreeMap<i32, Command>,
-    registrations: Pin<Box<mpsc::UnboundedReceiver<(i32, oneshot::Sender<Command>)>>>,
+    registrations: Pin<Box<mpsc::UnboundedReceiver<RegisterPair>>>,
     shutdown: Pin<Box<oneshot::Receiver<()>>>,
 }
 
@@ -132,7 +134,7 @@ impl<S: Stream<Item = Result<Command, ConnectionError>>> Receiver<S> {
         inbound: S,
         outbound: mpsc::UnboundedSender<Command>,
         error: SharedError,
-        registrations: mpsc::UnboundedReceiver<(i32, oneshot::Sender<Command>)>,
+        registrations: mpsc::UnboundedReceiver<RegisterPair>,
         shutdown: oneshot::Receiver<()>,
     ) -> Self {
         Receiver {
@@ -160,16 +162,17 @@ impl<S: Stream<Item = Result<Command, ConnectionError>>> Future for Receiver<S> 
 
         loop {
             match self.registrations.as_mut().poll_next(cx) {
-                Poll::Ready(Some((correlation_id, resolver))) => {
-                    match self.received_commands.remove(&correlation_id) {
-                        Some(command) => {
-                            let _ = resolver.send(command);
-                        }
-                        None => {
-                            self.pending_requests.insert(correlation_id, resolver);
-                        }
+                Poll::Ready(Some(RegisterPair {
+                    correlation_id,
+                    resolver,
+                })) => match self.received_commands.remove(&correlation_id) {
+                    Some(command) => {
+                        let _ = resolver.send(command);
                     }
-                }
+                    None => {
+                        self.pending_requests.insert(correlation_id, resolver);
+                    }
+                },
                 Poll::Ready(None) => {
                     self.error.set(ConnectionError::Disconnected);
                     return Poll::Ready(Err(()));
@@ -262,7 +265,7 @@ impl<Exe: Executor> Connection<Exe> {
         };
 
         let id = rand::random();
-        Ok(Connection { id, url, sender})
+        Ok(Connection { id, url, sender })
     }
 
     async fn prepare_stream(
