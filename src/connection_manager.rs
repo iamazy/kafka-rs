@@ -1,6 +1,7 @@
 use crate::connection::Connection;
 use crate::error::ConnectionError;
 use crate::executor::Executor;
+use crate::protocol::{Command, KafkaResponse};
 use futures::channel::oneshot;
 use futures::lock::Mutex;
 use futures::StreamExt;
@@ -11,7 +12,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use tracing::{error, info, trace};
 use url::Url;
-use crate::message::Command;
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct BrokerAddress {
@@ -124,16 +124,24 @@ impl<Exe: Executor> ConnectionManager<Exe> {
         Ok(manager)
     }
 
-    pub async fn invoke(&self, addr: &BrokerAddress, cmd: Command) -> Result<Command, ConnectionError> {
+    pub async fn invoke(
+        &self,
+        addr: &BrokerAddress,
+        cmd: Command,
+    ) -> Result<KafkaResponse, ConnectionError> {
         let conn = self.get_connection(addr).await?;
         let sender = conn.sender();
-        Ok(sender.send(cmd).await?)
+        sender.send(cmd, 1).await
     }
 
-    pub async fn invoke_oneway(&self, addr: &BrokerAddress, cmd: Command) -> Result<(), ConnectionError> {
+    pub async fn invoke_oneway(
+        &self,
+        addr: &BrokerAddress,
+        cmd: Command,
+    ) -> Result<(), ConnectionError> {
         let conn = self.get_connection(addr).await?;
         let sender = conn.sender();
-        Ok(sender.send_oneway(cmd).await?)
+        sender.send_oneway(cmd).await
     }
 
     pub fn get_base_address(&self) -> BrokerAddress {

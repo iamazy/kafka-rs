@@ -72,3 +72,9 @@ impl SharedError {
         self.error_set.store(true, Ordering::Release);
     }
 }
+
+impl Default for SharedError {
+    fn default() -> Self {
+        Self::new()
+    }
+}

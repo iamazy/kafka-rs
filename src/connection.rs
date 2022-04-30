@@ -1,17 +1,21 @@
 use crate::error::{ConnectionError, SharedError};
 use crate::executor::{Executor, ExecutorKind};
-use crate::message::{Command, KafkaCodec};
+use crate::protocol::{Command, KafkaCodec, KafkaRequest, KafkaResponse};
 use futures::channel::{mpsc, oneshot};
 use futures::future::{select, Either};
 use futures::{pin_mut, Future, FutureExt, Sink, SinkExt, Stream, StreamExt};
 use rand::{thread_rng, Rng};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
+use std::fmt::Debug;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use std::time::Duration;
+use dashmap::DashMap;
+use kafka_protocol::messages::{ApiKey, FetchResponse, ProduceResponse, RequestHeader};
+use kafka_protocol::protocol::{Decodable, Request};
 use tracing::{debug, error, trace};
 use url::Url;
 
@@ -64,7 +68,7 @@ impl<Exe: Executor> ConnectionSender<Exe> {
     }
 
     #[tracing::instrument(skip(self, cmd))]
-    pub async fn send(&self, cmd: Command) -> Result<Command, ConnectionError> {
+    pub async fn send(&self, cmd: Command, version: i16) -> Result<KafkaResponse, ConnectionError> {
         let (resolver, response) = oneshot::channel();
         let response = async {
             response.await.map_err(|oneshot::Canceled| {
@@ -72,6 +76,7 @@ impl<Exe: Executor> ConnectionSender<Exe> {
                 ConnectionError::Disconnected
             })
         };
+        let api_key = cmd.api_key();
         match (
             self.registrations
                 .unbounded_send((cmd.correlation_id(), resolver)),
@@ -83,7 +88,16 @@ impl<Exe: Executor> ConnectionSender<Exe> {
                 pin_mut!(delay_f);
 
                 match select(response, delay_f).await {
-                    Either::Left((res, _)) => res,
+                    Either::Left((res, _)) => {
+                        res.map(|res_cmd| {
+                            if let Command::Response(mut res) = res_cmd {
+                                let _ = res.fill_body(api_key.unwrap(), version);
+                                res
+                            } else {
+                                panic!("Expected response command");
+                            }
+                        })
+                    },
                     Either::Right(_) => Err(ConnectionError::Io(std::io::Error::new(
                         std::io::ErrorKind::TimedOut,
                         "timeout sending message to the kafka server",
@@ -210,7 +224,7 @@ impl<Exe: Executor> Connection<Exe> {
         let address: SocketAddr = match executor
             .spawn_blocking(move || {
                 u.socket_addrs(|| match u.scheme() {
-                    "kafka" => Some(6650),
+                    "kafka" => Some(9092),
                     _ => None,
                 })
                 .map_err(|e| {
@@ -248,7 +262,7 @@ impl<Exe: Executor> Connection<Exe> {
         };
 
         let id = rand::random();
-        Ok(Connection { id, url, sender })
+        Ok(Connection { id, url, sender})
     }
 
     async fn prepare_stream(
