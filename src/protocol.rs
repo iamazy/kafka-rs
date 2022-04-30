@@ -498,6 +498,20 @@ pub struct KafkaRequest {
     pub body: RequestKind,
 }
 
+impl KafkaRequest {
+    pub fn new(header: RequestHeader, body: RequestKind) -> KafkaRequest {
+        KafkaRequest { header, body }
+    }
+
+    pub fn correlation_id(&self) -> i32 {
+        self.header.correlation_id
+    }
+
+    pub fn api_key(&self) -> i16 {
+        self.header.request_api_key
+    }
+}
+
 pub struct KafkaResponse {
     pub header: ResponseHeader,
     pub raw_body: Vec<u8>,

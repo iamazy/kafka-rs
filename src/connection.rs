@@ -1,6 +1,6 @@
 use crate::error::{ConnectionError, SharedError};
 use crate::executor::{Executor, ExecutorKind};
-use crate::protocol::{Command, KafkaCodec, KafkaResponse};
+use crate::protocol::{Command, KafkaCodec, KafkaRequest, KafkaResponse};
 use futures::channel::{mpsc, oneshot};
 use futures::future::{select, Either};
 use futures::{pin_mut, Future, FutureExt, Sink, SinkExt, Stream, StreamExt};
@@ -69,8 +69,12 @@ impl<Exe: Executor> ConnectionSender<Exe> {
         }
     }
 
-    #[tracing::instrument(skip(self, cmd))]
-    pub async fn send(&self, cmd: Command, version: i16) -> Result<KafkaResponse, ConnectionError> {
+    #[tracing::instrument(skip(self, request))]
+    pub async fn send(
+        &self,
+        request: KafkaRequest,
+        version: i16,
+    ) -> Result<KafkaResponse, ConnectionError> {
         let (resolver, response) = oneshot::channel();
         let response = async {
             response.await.map_err(|oneshot::Canceled| {
@@ -78,13 +82,13 @@ impl<Exe: Executor> ConnectionSender<Exe> {
                 ConnectionError::Disconnected
             })
         };
-        let api_key = cmd.api_key();
+        let api_key = request.api_key();
         match (
             self.registrations.unbounded_send(RegisterPair {
-                correlation_id: cmd.correlation_id(),
+                correlation_id: request.correlation_id(),
                 resolver,
             }),
-            self.tx.unbounded_send(cmd),
+            self.tx.unbounded_send(Command::Request(request)),
         ) {
             (Ok(_), Ok(_)) => {
                 let delay_f = self.executor.delay(self.operation_timeout);
@@ -92,14 +96,14 @@ impl<Exe: Executor> ConnectionSender<Exe> {
                 pin_mut!(delay_f);
 
                 match select(response, delay_f).await {
-                    Either::Left((res, _)) => res.map(|res_cmd| {
-                        if let Command::Response(mut res) = res_cmd {
-                            let _ = res.fill_body(api_key.unwrap(), version);
-                            res
-                        } else {
-                            panic!("Expected response command");
-                        }
-                    }),
+                    Either::Left((Ok(Command::Response(mut res)), _)) => {
+                        let _ = res.fill_body(api_key, version);
+                        Ok(res)
+                    }
+                    Either::Left((Err(e), _)) => Err(e),
+                    Either::Left((_, _)) => Err(ConnectionError::UnexpectedResponse(
+                        "receive an invalid request".into(),
+                    )),
                     Either::Right(_) => Err(ConnectionError::Io(std::io::Error::new(
                         std::io::ErrorKind::TimedOut,
                         "timeout sending message to the kafka server",
